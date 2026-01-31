@@ -1,87 +1,118 @@
+import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
-    CallbackQueryHandler,
     ContextTypes,
-    filters
+    filters,
 )
-import os
 
+# ===== ENV VARIABLES =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
-USDT_ADDRESS = os.getenv("USDT_ADDRESS")
+USDT_ADDRESS = os.getenv("USDT_ADDRESS", "Not Set")
 
-users = set()
-orders = {}
-
+# ===== /start =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    users.add(update.effective_user.id)
     keyboard = [
-        [InlineKeyboardButton("🔥 VIP – ₹149 / 2 USDT", callback_data="vip")],
-        [InlineKeyboardButton("💎 Premium – ₹299 / 4 USDT", callback_data="premium")],
-        [InlineKeyboardButton("👑 Lifetime – ₹999 / 12 USDT", callback_data="life")]
+        [InlineKeyboardButton("💰 Price List", callback_data="price")],
+        [InlineKeyboardButton("💬 Chat with Admin", callback_data="chat")],
+        [InlineKeyboardButton("💳 Payment Method", callback_data="payment")]
     ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     await update.message.reply_text(
-        "Welcome 👋\nChoose a plan:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        "🌸 Welcome 🌸\n\nChoose an option below 👇",
+        reply_markup=reply_markup
     )
 
-async def plan_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    orders[q.from_user.id] = q.data
-    keyboard = [
-        [InlineKeyboardButton("🌍 Pay via USDT (TRC20)", callback_data="usdt")],
-        [InlineKeyboardButton("🎁 Pay via Gift Card", callback_data="gift")]
-    ]
-    await q.edit_message_text(
-        "Choose payment method:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+# ===== BUTTON HANDLER =====
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "price":
+        await query.message.reply_text(
+            "📌 PRICE LIST\n\n"
+            "• Telegram ID – ₹XXX\n"
+            "• WhatsApp ID – ₹XXX\n"
+            "• Combo – ₹XXX\n\n"
+            "💬 Buy karne ke liye Admin ko msg karein"
+        )
+
+    elif query.data == "chat":
+        await query.message.reply_text("💬 Apna message likho, admin tak pahunch jayega")
+
+    elif query.data == "payment":
+        await query.message.reply_text(
+            "💳 PAYMENT METHODS\n\n"
+            "✅ USDT (TRC20)\n"
+            f"`{USDT_ADDRESS}`\n\n"
+            "✅ Manual Trust Payment\n\n"
+            "Payment ke baad screenshot bhejo 📸",
+            parse_mode="Markdown"
+        )
+
+# ===== USER MESSAGE → ADMIN =====
+async def user_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+
+    # Agar admin hai to skip
+    if user.id == ADMIN_ID:
+        return
+
+    user_id = user.id
+    username = f"@{user.username}" if user.username else "Not Available"
+    name = user.first_name or ""
+
+    text = update.message.text
+
+    await context.bot.send_message(
+        chat_id=ADMIN_ID,
+        text=(
+            "👤 NEW USER MESSAGE\n\n"
+            f"🆔 User ID: `{user_id}`\n"
+            f"👤 Username: {username}\n"
+            f"📛 Name: {name}\n\n"
+            f"💬 Message:\n{text}"
+        ),
+        parse_mode="Markdown"
     )
 
-async def payment_method(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    if q.data == "usdt":
-        await q.edit_message_text(
-            f"Send USDT (TRC20) to:\n{USDT_ADDRESS}\n\nAfter payment, send TxID here."
-        )
-    elif q.data == "gift":
-        await q.edit_message_text(
-            "Send Gift Card code here.\n\nSupported:\nAmazon / Flipkart / Google Play"
-        )
+    await update.message.reply_text("✅ Admin ko bhej diya gaya")
 
-async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if uid != ADMIN_ID:
+# ===== ADMIN REPLY → USER =====
+async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    if not update.message.reply_to_message:
+        return
+
+    text = update.message.text
+
+    try:
+        lines = update.message.reply_to_message.text.splitlines()
+        user_id_line = [l for l in lines if "User ID" in l][0]
+        user_id = int(user_id_line.split("`")[1])
+
         await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=f"📩 From {uid}:\n{update.message.text}"
+            chat_id=user_id,
+            text=f"👑 Admin Reply:\n\n{text}"
         )
-        await update.message.reply_text("✅ Admin ko bhej diya gaya")
-    else:
-        if update.message.reply_to_message:
-            try:
-                to_uid = int(update.message.reply_to_message.text.split()[2])
-                await context.bot.send_message(chat_id=to_uid, text=update.message.text)
-            except:
-                pass
+    except Exception as e:
+        await update.message.reply_text("❌ Reply failed")
 
-async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id == ADMIN_ID:
-        await update.message.reply_text(
-            f"📊 Admin Panel\nUsers: {len(users)}\nPending orders: {len(orders)}"
-        )
-
+# ===== MAIN =====
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("panel", panel))
-    app.add_handler(CallbackQueryHandler(plan_select, pattern="^(vip|premium|life)$"))
-    app.add_handler(CallbackQueryHandler(payment_method, pattern="^(usdt|gift)$"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, messages))
+    app.add_handler(MessageHandler(filters.TEXT & filters.REPLY, admin_reply))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, user_message))
+    app.add_handler(MessageHandler(filters.UpdateType.CALLBACK_QUERY, button_handler))
+
     print("🤖 Bot running...")
     app.run_polling()
 
